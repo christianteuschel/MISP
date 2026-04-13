@@ -29,6 +29,14 @@
         <span class="fas fa-minus" title="<?php echo __('Toggle discussions');?>" role="button" tabindex="0" aria-label="<?php echo __('Toggle discussions');?>"></span><?php echo __('Discussion');?>
     </button>
     <?php endif; ?>
+    <button class="btn btn-inverse" id="audio_explain_btn"
+            title="<?= __('Explain this event as audio') ?>"
+            style="margin-left: 8px;"
+            onclick="explainEventAsAudio()">
+        <span class="fas fa-volume-up" id="audio_explain_icon"
+              role="button" tabindex="0"
+              aria-label="<?= __('Explain this event as audio') ?>"></span><?= __('Explain') ?>
+    </button>
 </div>
 <br>
 <br>
@@ -99,4 +107,95 @@ $.get("<?php echo $baseurl; ?>/eventReports/index/event_id:<?= h($event['Event']
     }
 });
 });
+
+var mispEventAudio = (function() {
+    var threatLevels = {1: 'High', 2: 'Medium', 3: 'Low', 4: 'Undefined'};
+    var distributions = {
+        0: 'your organisation only',
+        1: 'this community only',
+        2: 'connected communities',
+        3: 'all communities',
+        4: 'a sharing group'
+    };
+    var d = {
+        id:             <?= (int)$event['Event']['id'] ?>,
+        info:           <?= json_encode(h($event['Event']['info'])) ?>,
+        date:           <?= json_encode(h($event['Event']['date'])) ?>,
+        orgc:           <?= json_encode(h($event['Event']['Orgc']['name'])) ?>,
+        threatLevel:    <?= (int)$event['Event']['threat_level_id'] ?>,
+        distribution:   <?= (int)$event['Event']['distribution'] ?>,
+        attributeCount: <?= (int)($event['Event']['attribute_count'] ?? 0) ?>,
+        objectCount:    <?= (int)count($event['Object'] ?? []) ?>,
+        llmEnabled:     <?= Configure::read('Plugin.CTIInfoExtractor_enable') ? 'true' : 'false' ?>
+    };
+
+    function buildSummary() {
+        var s = 'Event ' + d.id + ': ' + d.info + '. ';
+        s += 'Created on ' + d.date + ' by ' + d.orgc + '. ';
+        s += 'Threat level: ' + (threatLevels[d.threatLevel] || 'unknown') + '. ';
+        s += 'Distribution: ' + (distributions[d.distribution] || 'unknown') + '. ';
+        if (d.attributeCount > 0) {
+            s += 'Contains ' + d.attributeCount + ' attribute' +
+                (d.attributeCount !== 1 ? 's' : '') + '. ';
+        }
+        if (d.objectCount > 0) {
+            s += d.objectCount + ' object' +
+                (d.objectCount !== 1 ? 's' : '') + '. ';
+        }
+        return s;
+    }
+
+    return {
+        buildSummary: buildSummary,
+        isLlmEnabled: function() { return d.llmEnabled; },
+        getId: function() { return d.id; }
+    };
+})();
+
+function explainEventAsAudio() {
+    if (!window.speechSynthesis) {
+        showMessage('warning',
+            <?= json_encode(__('Your browser does not support speech synthesis.')) ?>);
+        return;
+    }
+
+    var $icon = $('#audio_explain_icon');
+    var $btn  = $('#audio_explain_btn');
+
+    // Stop if already speaking
+    if (window.speechSynthesis.speaking) {
+        window.speechSynthesis.cancel();
+        $icon.removeClass('fa-stop fa-spinner fa-spin').addClass('fa-volume-up');
+        $btn.attr('title', <?= json_encode(__('Explain this event as audio')) ?>);
+        return;
+    }
+
+    function speak(text) {
+        var utt = new SpeechSynthesisUtterance(text);
+        utt.onend = utt.onerror = function() {
+            $icon.removeClass('fa-stop').addClass('fa-volume-up');
+            $btn.attr('title', <?= json_encode(__('Explain this event as audio')) ?>);
+        };
+        $icon.removeClass('fa-volume-up fa-spinner fa-spin').addClass('fa-stop');
+        $btn.attr('title', <?= json_encode(__('Stop audio')) ?>);
+        window.speechSynthesis.speak(utt);
+    }
+
+    if (mispEventAudio.isLlmEnabled()) {
+        $icon.removeClass('fa-volume-up').addClass('fa-spinner fa-spin');
+        $.ajax({
+            url: baseurl + '/events/explainAsAudio/' + mispEventAudio.getId(),
+            type: 'GET',
+            success: function(data) {
+                speak((data && data.text) ? data.text : mispEventAudio.buildSummary());
+            },
+            error: function() {
+                $icon.removeClass('fa-spinner fa-spin').addClass('fa-volume-up');
+                speak(mispEventAudio.buildSummary());
+            }
+        });
+    } else {
+        speak(mispEventAudio.buildSummary());
+    }
+}
 </script>

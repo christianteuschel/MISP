@@ -5566,6 +5566,41 @@ class EventsController extends AppController
         $this->render('view');
     }
 
+    public function explainAsAudio($id)
+    {
+        if (!$this->request->is('ajax')) {
+            throw new MethodNotAllowedException(
+                __('This function can only be reached via AJAX.')
+            );
+        }
+        $event = $this->Event->fetchSimpleEvent(
+            $this->Auth->user(),
+            $id,
+            [
+                'fields' => [
+                    'id', 'info', 'date', 'threat_level_id',
+                    'distribution', 'attribute_count',
+                ],
+            ]
+        );
+        if (empty($event)) {
+            throw new NotFoundException(__('Event not found.'));
+        }
+
+        // LLM path: extend here when CTIInfoExtractor or another LLM
+        // service supports event-level summaries.
+        $threatLevels = [
+            1 => 'High', 2 => 'Medium', 3 => 'Low', 4 => 'Undefined',
+        ];
+        $e = $event['Event'];
+        $text  = 'Event ' . $e['id'] . ': ' . $e['info'] . '. ';
+        $text .= 'Threat level: ' .
+            ($threatLevels[$e['threat_level_id']] ?? 'Unknown') . '. ';
+        $text .= 'Contains ' . ($e['attribute_count'] ?? 0) . ' attributes.';
+
+        return $this->RestResponse->viewData(['text' => $text], 'json');
+    }
+
     public function viewGraph($id)
     {
         $event = $this->Event->fetchSimpleEvent($this->Auth->user(), $id);

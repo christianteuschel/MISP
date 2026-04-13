@@ -304,6 +304,7 @@ class ACLComponent extends Component
             'downloadOpenIOCEvent' => array('*'),
             'edit' => array('perm_add'),
             'enrichEvent' => array('perm_add'),
+            'explainAsAudio' => array('*'),
             'export' => array('*'),
             'exportChoice' => array('*'),
             'exportModule' => array('*'),
