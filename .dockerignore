@@ -1,0 +1,49 @@
+# Keep the build context small — source is mounted as a volume at runtime.
+# Only the docker/ directory and a few small files are actually COPYed.
+
+# Python
+venv/
+__pycache__/
+*.pyc
+*.pyo
+.pytest_cache/
+PyMISP/
+
+# PHP runtime artefacts (populated inside the container)
+app/Vendor/
+app/vendor/
+app/tmp/
+app/files/samples/
+app/files/img/orgs/
+app/files/img/users/
+
+# Node / front-end build artefacts
+node_modules/
+.npm/
+
+# Git
+.git/
+.gitmodules
+
+# Docs and tooling
+docs/
+site/
+tools/
+tests/
+INSTALL/
+debian/
+build/
+
+# IDE / OS
+.idea/
+.vscode/
+.DS_Store
+*.swp
+*.swo
+
+# Secrets / generated config (never bake into the image)
+app/Config/database.php
+app/Config/config.php
+app/Config/bootstrap.php
+app/Config/core.php
+.gnupg/

@@ -1,0 +1,84 @@
+# MISP local development environment
+#
+# First run (from repo root):
+#   docker compose up --build
+#
+# On first boot the entrypoint will:
+#   - run composer install and pip install
+#   - import the DB schema
+#   - create the admin user (admin@admin.test / admin)
+#   - print the API key to the logs
+#
+# Subsequent runs:
+#   docker compose up
+#
+# Run cake commands:
+#   docker compose exec misp app/Console/cake <command>
+#
+# Tail MISP worker logs:
+#   docker compose exec misp tail -f /var/www/MISP/app/tmp/logs/misp-workers.log
+
+services:
+  misp:
+    build:
+      context: .
+      dockerfile: docker/Dockerfile
+    ports:
+      - "80:80"
+    volumes:
+      # Live source code — changes are reflected immediately
+      - .:/var/www/MISP
+      # Linux-specific runtime artefacts kept in named volumes so they
+      # are not mixed with the host checkout and persist across restarts.
+      - vendor:/var/www/MISP/app/Vendor
+      - venv:/var/www/MISP/venv
+      - tmp:/var/www/MISP/app/tmp
+      - gnupg:/var/www/MISP/.gnupg
+    environment:
+      MISP_BASEURL:       http://localhost
+      DBHOST:             db
+      DBPORT:             3306
+      DBNAME:             misp
+      DBUSER_MISP:        misp
+      DBPASSWORD_MISP:    misp
+      REDIS_HOST:         redis
+      MISP_ADMIN_PASSWORD: admin
+      SUPERVISOR_USER:    supervisor
+      SUPERVISOR_PASSWORD: supervisor
+    depends_on:
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_started
+    restart: unless-stopped
+
+  db:
+    image: mariadb:11
+    environment:
+      MARIADB_ROOT_PASSWORD: root
+      MARIADB_DATABASE:      misp
+      MARIADB_USER:          misp
+      MARIADB_PASSWORD:      misp
+    volumes:
+      - db_data:/var/lib/mysql
+    healthcheck:
+      test: ["CMD", "healthcheck.sh", "--connect", "--innodb_initialized"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 30s
+    restart: unless-stopped
+
+  redis:
+    image: redis:7-alpine
+    volumes:
+      - redis_data:/data
+    restart: unless-stopped
+
+volumes:
+  db_data:
+  redis_data:
+  vendor:
+  venv:
+  tmp:
+  gnupg:
