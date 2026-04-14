@@ -29,14 +29,39 @@
         <span class="fas fa-minus" title="<?php echo __('Toggle discussions');?>" role="button" tabindex="0" aria-label="<?php echo __('Toggle discussions');?>"></span><?php echo __('Discussion');?>
     </button>
     <?php endif; ?>
-    <button class="btn btn-inverse" id="audio_explain_btn"
-            title="<?= __('Explain this event as audio') ?>"
-            style="margin-left: 8px;"
-            onclick="explainEventAsAudio()">
-        <span class="fas fa-volume-up" id="audio_explain_icon"
-              role="button" tabindex="0"
-              aria-label="<?= __('Explain this event as audio') ?>"></span><?= __('Explain') ?>
-    </button>
+    <span style="display:inline-flex;align-items:center;margin-left:8px;gap:5px;">
+        <button class="btn btn-inverse" id="audio_explain_btn"
+                title="<?= __('Explain this event as audio') ?>"
+                onclick="explainEventAsAudio()">
+            <span class="fas fa-volume-up" id="audio_explain_icon"
+                  role="button" tabindex="0"
+                  aria-label="<?= __('Explain this event as audio') ?>"></span><?= __('Explain') ?>
+        </button>
+        <span style="display:inline-flex;align-items:center;gap:4px;
+                     font-size:11px;color:#ccc;vertical-align:middle;">
+            <span><?= __('Tmpl') ?></span>
+            <label style="position:relative;display:inline-block;
+                          width:34px;height:18px;margin:0;cursor:pointer;"
+                   title="<?= __('Switch between template and LLM explanation') ?>">
+                <input type="checkbox" id="audio_llm_mode"
+                       style="opacity:0;width:0;height:0;position:absolute;">
+                <span id="audio_mode_track"
+                      style="position:absolute;top:0;left:0;right:0;bottom:0;
+                             background:#555;border-radius:18px;transition:.25s;">
+                    <span id="audio_mode_knob"
+                          style="position:absolute;height:12px;width:12px;
+                                 left:3px;bottom:3px;background:#fff;
+                                 border-radius:50%;transition:.25s;"></span>
+                </span>
+            </label>
+            <span><?= __('LLM') ?></span>
+            <span id="audio_llm_status"
+                  style="display:inline-block;width:8px;height:8px;
+                         border-radius:50%;background:#555;
+                         vertical-align:middle;cursor:default;"
+                  title="<?= __('LLM status unknown — click Explain to test') ?>"></span>
+        </span>
+    </span>
 </div>
 <br>
 <br>
@@ -108,6 +133,13 @@ $.get("<?php echo $baseurl; ?>/eventReports/index/event_id:<?= h($event['Event']
 });
 });
 
+// Toggle slider knob animation
+$('#audio_llm_mode').on('change', function() {
+    var on = this.checked;
+    $('#audio_mode_knob').css('left', on ? '19px' : '3px');
+    $('#audio_mode_track').css('background', on ? '#5bc0de' : '#555');
+});
+
 var mispEventAudio = (function() {
     var threatLevels = {1: 'High', 2: 'Medium', 3: 'Low', 4: 'Undefined'};
     var distributions = {
@@ -125,8 +157,7 @@ var mispEventAudio = (function() {
         threatLevel:    <?= (int)$event['Event']['threat_level_id'] ?>,
         distribution:   <?= (int)$event['Event']['distribution'] ?>,
         attributeCount: <?= (int)($event['Event']['attribute_count'] ?? 0) ?>,
-        objectCount:    <?= (int)count($event['Object'] ?? []) ?>,
-        llmEnabled:     <?= Configure::read('Plugin.CTIInfoExtractor_enable') ? 'true' : 'false' ?>
+        objectCount:    <?= (int)count($event['Object'] ?? []) ?>
     };
 
     function buildSummary() {
@@ -147,7 +178,6 @@ var mispEventAudio = (function() {
 
     return {
         buildSummary: buildSummary,
-        isLlmEnabled: function() { return d.llmEnabled; },
         getId: function() { return d.id; }
     };
 })();
@@ -181,17 +211,45 @@ function explainEventAsAudio() {
         window.speechSynthesis.speak(utt);
     }
 
-    if (mispEventAudio.isLlmEnabled()) {
+    // Update the persistent status dot next to the LLM label.
+    // state: 'idle' | 'connecting' | 'ok' | 'error'
+    function setLlmStatus(state, message) {
+        var $dot = $('#audio_llm_status');
+        var colors = {idle: '#555', connecting: '#5bc0de', ok: '#5cb85c', error: '#d9534f'};
+        var titles = {
+            idle:       <?= json_encode(__('LLM status unknown — click Explain to test')) ?>,
+            connecting: <?= json_encode(__('Connecting to Ollama…')) ?>,
+            ok:         <?= json_encode(__('LLM responded successfully')) ?>,
+            error:      message || <?= json_encode(__('LLM connection failed')) ?>
+        };
+        $dot.css('background', colors[state] || colors.idle)
+            .attr('title', titles[state] || titles.idle);
+    }
+
+    var useLlm = $('#audio_llm_mode').prop('checked');
+    if (useLlm) {
         $icon.removeClass('fa-volume-up').addClass('fa-spinner fa-spin');
+        setLlmStatus('connecting');
         $.ajax({
-            url: baseurl + '/events/explainAsAudio/' + mispEventAudio.getId(),
+            url: baseurl + '/events/explainAsAudio/' + mispEventAudio.getId()
+                + '?mode=llm',
             type: 'GET',
+            dataType: 'json',
             success: function(data) {
-                speak((data && data.text) ? data.text : mispEventAudio.buildSummary());
-            },
-            error: function() {
                 $icon.removeClass('fa-spinner fa-spin').addClass('fa-volume-up');
-                speak(mispEventAudio.buildSummary());
+                if (data && data.error) {
+                    setLlmStatus('error', data.error);
+                    showMessage('warning', data.error);
+                    return;
+                }
+                setLlmStatus('ok');
+                speak(data.text);
+            },
+            error: function(xhr) {
+                $icon.removeClass('fa-spinner fa-spin').addClass('fa-volume-up');
+                var msg = <?= json_encode(__('Could not reach the LLM endpoint.')) ?>;
+                setLlmStatus('error', msg);
+                showMessage('warning', msg);
             }
         });
     } else {

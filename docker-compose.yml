@@ -45,6 +45,8 @@ services:
       MISP_ADMIN_PASSWORD: admin
       SUPERVISOR_USER:    supervisor
       SUPERVISOR_PASSWORD: supervisor
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     depends_on:
       db:
         condition: service_healthy

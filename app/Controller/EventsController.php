@@ -5581,24 +5581,132 @@ class EventsController extends AppController
                     'id', 'info', 'date', 'threat_level_id',
                     'distribution', 'attribute_count',
                 ],
+                'contain' => [
+                    'Orgc'     => ['fields' => ['name']],
+                    'EventTag' => ['Tag' => ['fields' => ['name']]],
+                ],
             ]
         );
         if (empty($event)) {
             throw new NotFoundException(__('Event not found.'));
         }
 
-        // LLM path: extend here when CTIInfoExtractor or another LLM
-        // service supports event-level summaries.
         $threatLevels = [
             1 => 'High', 2 => 'Medium', 3 => 'Low', 4 => 'Undefined',
         ];
         $e = $event['Event'];
+
+        $mode = $this->request->query('mode');
+        if ($mode === 'llm') {
+            $llmError = null;
+            $text = $this->__explainAsAudioViaLlm($event, $threatLevels, $llmError);
+            if ($text !== false) {
+                return $this->RestResponse->viewData(
+                    ['text' => $text, 'source' => 'llm'], 'json'
+                );
+            }
+            // LLM failed: tell the caller explicitly so they can surface it
+            return $this->RestResponse->viewData(
+                ['error' => $llmError], 'json'
+            );
+        }
+
+        // Template-based (default)
         $text  = 'Event ' . $e['id'] . ': ' . $e['info'] . '. ';
+        $text .= 'Created on ' . $e['date'] . ' by ' .
+            ($event['Orgc']['name'] ?? 'unknown organisation') . '. ';
         $text .= 'Threat level: ' .
             ($threatLevels[$e['threat_level_id']] ?? 'Unknown') . '. ';
         $text .= 'Contains ' . ($e['attribute_count'] ?? 0) . ' attributes.';
 
-        return $this->RestResponse->viewData(['text' => $text], 'json');
+        return $this->RestResponse->viewData(
+            ['text' => $text, 'source' => 'template'], 'json'
+        );
+    }
+
+    /**
+     * Build an event explanation via a local Ollama llama3 instance.
+     *
+     * Returns the spoken text string, or false on failure.
+     * The Ollama endpoint and model are configurable via:
+     *   Plugin.AudioExplain_ollama_url   (default: http://localhost:11434)
+     *   Plugin.AudioExplain_ollama_model (default: llama3)
+     *
+     * @param array $event
+     * @param array $threatLevels
+     * @return string|false
+     */
+    private function __explainAsAudioViaLlm(array $event, array $threatLevels, &$error = null)
+    {
+        $ollamaUrl = Configure::read('Plugin.AudioExplain_ollama_url')
+            ?: 'http://host.docker.internal:11434';
+        $ollamaModel = Configure::read('Plugin.AudioExplain_ollama_model')
+            ?: 'llama3.2:1b';
+
+        $e = $event['Event'];
+        $tags = [];
+        if (!empty($event['EventTag'])) {
+            foreach ($event['EventTag'] as $et) {
+                if (!empty($et['Tag']['name'])) {
+                    $tags[] = $et['Tag']['name'];
+                }
+            }
+        }
+
+        $prompt  = 'You are a cybersecurity analyst. ';
+        $prompt .= 'Explain the following MISP threat intelligence event in ';
+        $prompt .= 'clear spoken English suitable for being read aloud. ';
+        $prompt .= 'Be concise (two to three sentences). ';
+        $prompt .= 'Provide only the spoken text, no markdown or lists.' . "\n\n";
+        $prompt .= 'Event title: ' . $e['info'] . "\n";
+        $prompt .= 'Date: ' . $e['date'] . "\n";
+        $prompt .= 'Threat level: ' .
+            ($threatLevels[$e['threat_level_id']] ?? 'Unknown') . "\n";
+        $prompt .= 'Number of attributes: ' . ($e['attribute_count'] ?? 0) . "\n";
+        if (!empty($tags)) {
+            $prompt .= 'Tags: ' .
+                implode(', ', array_slice($tags, 0, 15)) . "\n";
+        }
+
+        App::uses('HttpSocket', 'Network/Http');
+        $http = new HttpSocket(['timeout' => 60]);
+        try {
+            $response = $http->post(
+                rtrim($ollamaUrl, '/') . '/api/generate',
+                json_encode([
+                    'model'  => $ollamaModel,
+                    'prompt' => $prompt,
+                    'stream' => false,
+                ]),
+                ['header' => [
+                    'Content-Type' => 'application/json',
+                    'Accept'       => 'application/json',
+                ]]
+            );
+        } catch (Exception $e) {
+            $error = __(
+                'Could not connect to Ollama at %s (%s). '
+                    . 'Make sure Ollama is running and llama3 is pulled.',
+                $ollamaUrl,
+                $e->getMessage()
+            );
+            return false;
+        }
+
+        if (!$response->isOk()) {
+            $body = json_decode($response->body(), true);
+            $ollamaMsg = !empty($body['error']) ? $body['error'] : null;
+            $error = $ollamaMsg
+                ?: __('Ollama returned HTTP %s', $response->code);
+            return false;
+        }
+        $data = json_decode($response->body(), true);
+        $text = trim($data['response'] ?? '');
+        if ($text === '') {
+            $error = __('Ollama responded but returned empty text.');
+            return false;
+        }
+        return $text;
     }
 
     public function viewGraph($id)
