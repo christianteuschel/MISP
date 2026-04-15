@@ -8434,6 +8434,22 @@ class Server extends AppModel
                     'test' => 'testForEmpty',
                     'type' => 'string',
                     'null' => 'true'
+                ],
+                'AudioExplain_ollama_url' => [
+                    'level' => 1,
+                    'description' => __('The base URL of the Ollama instance used to generate audio explanations for events (e.g. http://host.docker.internal:11434).'),
+                    'value' => 'http://host.docker.internal:11434',
+                    'test' => 'testForEmpty',
+                    'type' => 'string',
+                    'null' => true
+                ],
+                'AudioExplain_ollama_model' => [
+                    'level' => 1,
+                    'description' => __('The Ollama model used to generate audio explanations for events. Run "ollama list" on the host to see available models.'),
+                    'value' => 'llama3.2:1b',
+                    'test' => 'testForEmpty',
+                    'type' => 'string',
+                    'null' => true
                 ]
             ),
             'SimpleBackgroundJobs' => [
